@@ -1,0 +1,459 @@
+{
+  "version": 1,
+  "overlayBase": "http://127.0.0.1:4320",
+  "notes": [
+    "Scene names are prefixed with the canvas orientation detected at provision time (LANDSCAPE or PORTRAIT).",
+    "Source rects: 'media'/'media2' = the template's camera/chart slots (sit above the overlay; portrait canvases use 4:5, 9:16 or 1:1 source boxes), 'media-fill'/'media2-fill' = cover-crop, 'media-stretch'/'media2-stretch' = distort-to-fill, 'background' = fullscreen behind a transparent overlay, 'a4' = A4-proportioned slide fit, or an explicit [x,y,w,h] box in canvas pixels.",
+    "Fit modes: default is SCALE_INNER — any source aspect is letterboxed/pillarboxed inside its rect, so landscape charts and portrait phone cams both sit correctly in either canvas. Use -fill to cover-crop or -stretch to distort.",
+    "Portrait safe area (TikTok): all template content stays above ~y1560 and left of x960; only the disclosure sits in the risky bottom band. Keep operator-placed sources inside the same zone with explicit rects if needed.",
+    "kind:camera sources become v4l2 capture devices (OBS Camera / DroidCam phones as UVC webcams). Two 'camera' entries fill CAM 1 then CAM 2 — give the second rect 'media2'. If no webcam is found at provision time a labeled browser placeholder is created instead; retarget it in OBS.",
+    "kind:game is any fullscreen capture (gameplay recording, console capture) placed behind the transparent overlay.",
+    "kind:ndi is a wireless phone camera via NDI|HX Camera (needs the obs-ndi plugin + NDI Runtime). Set \"name\" to the phone's NDI source name — leave it out and provisioning auto-picks when exactly one source is broadcasting.",
+    "kind:vdo is a wireless phone camera via VDO.Ninja — zero install. Put the OBS URL that vdo.ninja gives you into \"url\" (or retarget the source in OBS Properties → URL).",
+    "Sources marked TODO are placeholders — retarget them to real captures. Re-running provisioning never overwrites a URL you already changed.",
+    "The published snapshot's orientation must match the OBS canvas. Use the control desk Orientation select before going live.",
+    "OBS browser sources allow loopback URLs, so http://127.0.0.1:4320 works directly in OBS Studio."
+  ],
+  "scenes": [
+    {
+      "id": "starting-soon",
+      "name": "Starting Soon",
+      "templateId": "starting-soon",
+      "sources": [],
+      "use": "Countdown / waiting room before the stream goes live"
+    },
+    {
+      "id": "hype-intro",
+      "name": "Hype Intro",
+      "templateId": "hype-intro",
+      "sources": [],
+      "use": "High-energy cold open — FIGHT! energy"
+    },
+    {
+      "id": "title-card",
+      "name": "Title Card",
+      "templateId": "title-card",
+      "sources": [],
+      "use": "Manifesto title drop — the statement itself"
+    },
+    {
+      "id": "vigil",
+      "name": "Vigil",
+      "templateId": "vigil",
+      "sources": [],
+      "use": "Atmospheric cold open / quiet moment"
+    },
+    {
+      "id": "principles-board",
+      "name": "Principles Board",
+      "templateId": "principles-board",
+      "sources": [],
+      "use": "Four core principles as cards"
+    },
+    {
+      "id": "education-board",
+      "name": "Education Board",
+      "templateId": "board",
+      "sources": [],
+      "use": "Main teaching board, up to five points"
+    },
+    {
+      "id": "chart-focus",
+      "name": "Chart Focus",
+      "templateId": "chart",
+      "sources": [
+        {
+          "kind": "chart",
+          "label": "chart",
+          "rect": "media"
+        }
+      ],
+      "use": "Gold-candle chart capture in the media slot with market context"
+    },
+    {
+      "id": "chart-full",
+      "name": "Chart Full",
+      "templateId": "chart",
+      "sources": [
+        {
+          "kind": "chart",
+          "label": "chart",
+          "rect": "background"
+        }
+      ],
+      "use": "Fullscreen chart behind a transparent overlay — maximum screen for analysis"
+    },
+    {
+      "id": "presenter",
+      "name": "Presenter",
+      "templateId": "presenter",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "camera",
+          "rect": "media"
+        }
+      ],
+      "use": "Camera in the media slot with title and points"
+    },
+    {
+      "id": "bts",
+      "name": "Behind the Scenes",
+      "templateId": "presenter",
+      "sources": [
+        {
+          "kind": "video",
+          "label": "bts",
+          "rect": "background"
+        }
+      ],
+      "use": "BTS footage fullscreen behind the overlay"
+    },
+    {
+      "id": "qa",
+      "name": "Q&A",
+      "templateId": "qa",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "host-cam",
+          "rect": "media2"
+        }
+      ],
+      "use": "Answer viewer questions"
+    },
+    {
+      "id": "poll",
+      "name": "Poll / Quiz",
+      "templateId": "poll",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "host-cam",
+          "rect": "media2"
+        }
+      ],
+      "use": "Interactive poll — options A to D, answer live on chat"
+    },
+    {
+      "id": "chat-highlight",
+      "name": "Chat Highlight",
+      "templateId": "chat-highlight",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "camera",
+          "rect": "media"
+        }
+      ],
+      "use": "Celebrate a viewer — camera or clip in the media slot"
+    },
+    {
+      "id": "resources",
+      "name": "Resources & Links",
+      "templateId": "resource-card",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "host-cam",
+          "rect": "media2"
+        }
+      ],
+      "use": "Links to resources — pair with the Link field or live cues"
+    },
+    {
+      "id": "slides-pdf",
+      "name": "Slides / PDF A4",
+      "templateId": "board",
+      "sources": [
+        {
+          "kind": "slides",
+          "label": "slides.pdf",
+          "rect": "a4"
+        }
+      ],
+      "use": "PDF slides in A4 portrait fit — replace the placeholder with your deck"
+    },
+    {
+      "id": "website-view",
+      "name": "Website View",
+      "templateId": "recap-closing",
+      "sources": [
+        {
+          "kind": "website",
+          "label": "website",
+          "rect": "background"
+        }
+      ],
+      "use": "Your site, docs or dashboard fullscreen behind the overlay"
+    },
+    {
+      "id": "short-break",
+      "name": "Short Break",
+      "templateId": "short-break",
+      "sources": [],
+      "use": "Intermission with countdown"
+    },
+    {
+      "id": "brb",
+      "name": "BRB / Technical Difficulty",
+      "templateId": "technical-difficulty",
+      "sources": [],
+      "use": "Emergency hold — also the independent SVG fallback"
+    },
+    {
+      "id": "end-screen",
+      "name": "End Screen / CTA",
+      "templateId": "end-screen",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "host-cam",
+          "rect": "media2"
+        }
+      ],
+      "use": "Follow / subscribe call to action with link"
+    },
+    {
+      "id": "recap-closing",
+      "name": "Recap & Closing",
+      "templateId": "recap-closing",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "host-cam",
+          "rect": "media2"
+        }
+      ],
+      "use": "Summarise the session and close — signoff"
+    },
+    {
+      "id": "duo-cam",
+      "name": "Duo Cam — Two Phones",
+      "templateId": "duo-cam",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "cam-host",
+          "rect": "media"
+        },
+        {
+          "kind": "camera",
+          "label": "cam-player",
+          "rect": "media2"
+        }
+      ],
+      "use": "Host + guest/player on two phone cameras, stacked or side by side"
+    },
+    {
+      "id": "vs-battle",
+      "name": "VS Battle",
+      "templateId": "vs-battle",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "cam-player-a",
+          "rect": "media"
+        },
+        {
+          "kind": "camera",
+          "label": "cam-player-b",
+          "rect": "media2"
+        }
+      ],
+      "use": "Head-to-head matchup — fighter names go in the two Points fields"
+    },
+    {
+      "id": "gameplay",
+      "name": "Gameplay + Player Cam",
+      "templateId": "gameplay",
+      "sources": [
+        {
+          "kind": "game",
+          "label": "gameplay",
+          "rect": "background"
+        },
+        {
+          "kind": "camera",
+          "label": "cam-player",
+          "rect": "media"
+        }
+      ],
+      "use": "Fullscreen game capture behind the overlay, phone cam in the corner slot"
+    },
+    {
+      "id": "player-intro",
+      "name": "Player Intro",
+      "templateId": "player-intro",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "cam-player",
+          "rect": "media"
+        }
+      ],
+      "use": "Single big phone cam for player intros and shoutouts"
+    },
+    {
+      "id": "gameplay-cam",
+      "name": "Gameplay — Cam Only",
+      "templateId": "gameplay",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "cam-player",
+          "rect": "media"
+        }
+      ],
+      "use": "Player cam in the slot with game info points — add a game capture source manually if wanted"
+    },
+    {
+      "id": "duo-cam-ndi",
+      "name": "Duo Cam — NDI Phones",
+      "templateId": "duo-cam",
+      "sources": [
+        {
+          "kind": "ndi",
+          "label": "ndi-host",
+          "rect": "media",
+          "name": "HOST PHONE"
+        },
+        {
+          "kind": "ndi",
+          "label": "ndi-player",
+          "rect": "media2",
+          "name": "PLAYER PHONE"
+        }
+      ],
+      "use": "Two phones over NDI|HX — wireless. Replace the name values with each phone's NDI source name"
+    },
+    {
+      "id": "vs-battle-ndi",
+      "name": "VS Battle — NDI",
+      "templateId": "vs-battle",
+      "sources": [
+        {
+          "kind": "ndi",
+          "label": "ndi-player-a",
+          "rect": "media",
+          "name": "PLAYER A PHONE"
+        },
+        {
+          "kind": "ndi",
+          "label": "ndi-player-b",
+          "rect": "media2",
+          "name": "PLAYER B PHONE"
+        }
+      ],
+      "use": "Head-to-head over NDI|HX — replace name values with each phone's NDI source name"
+    },
+    {
+      "id": "live-shop",
+      "name": "Live Shop — Cam + TV",
+      "templateId": "live-shop",
+      "sources": [
+        {
+          "kind": "camera",
+          "label": "cam-pov",
+          "rect": "media"
+        },
+        {
+          "kind": "chart",
+          "label": "tv-screen",
+          "rect": "media2"
+        }
+      ],
+      "use": "TikTok live shop — Aish cam POV with TV/monitor presenting behind"
+    },
+    {
+      "id": "fight-mode",
+      "name": "Fight Mode — 2x MT5",
+      "templateId": "fight-mode",
+      "sources": [
+        {
+          "kind": "chart",
+          "label": "mt5-trader-a",
+          "rect": "media"
+        },
+        {
+          "kind": "chart",
+          "label": "mt5-trader-b",
+          "rect": "media2"
+        }
+      ],
+      "use": "Two MT5 screens side by side (portrait stack) — trading duel"
+    },
+    {
+      "id": "trader-focus",
+      "name": "Trader Focus — MT5 A",
+      "templateId": "trader-focus",
+      "sources": [
+        {
+          "kind": "chart",
+          "label": "mt5-trader-a",
+          "rect": "media"
+        },
+        {
+          "kind": "camera",
+          "label": "narrator-cam",
+          "rect": "media2"
+        }
+      ],
+      "use": "Single trader MT5 focus with optional narrator cam strip"
+    },
+    {
+      "id": "commentary",
+      "name": "Commentary — MT5 + Aish Cam",
+      "templateId": "commentary",
+      "sources": [
+        {
+          "kind": "chart",
+          "label": "mt5-trader-a",
+          "rect": "media"
+        },
+        {
+          "kind": "chart",
+          "label": "mt5-trader-b",
+          "rect": "media2"
+        },
+        {
+          "kind": "camera",
+          "label": "aish-cam",
+          "rect": "media3"
+        }
+      ],
+      "use": "Fight layout plus Aish cam (chroma-key/motion-tracked in OBS)"
+    },
+    {
+      "id": "winner",
+      "name": "Winner — Event Recap",
+      "templateId": "winner",
+      "sources": [
+        {
+          "kind": "chart",
+          "label": "highlight-a",
+          "rect": "media"
+        },
+        {
+          "kind": "chart",
+          "label": "highlight-b",
+          "rect": "media2"
+        }
+      ],
+      "use": "Winner announcement with two highlight/replay sources"
+    },
+    {
+      "id": "manifesto-about",
+      "name": "Malam Manifesto — About",
+      "templateId": "manifesto-about",
+      "sources": [
+        {
+          "kind": "video",
+          "label": "brand-loop",
+          "rect": "media"
+        }
+      ],
+      "use": "About Malam Manifesto with brand video loop"
+    }
+  ]
+}
