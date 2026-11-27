@@ -221,3 +221,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Malam Manifesto Live
+node_modules/
+coverage/
+test-results/
+playwright-report/
+releases/
+qualification-evidence/
+.claude/
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.ripgreprc
+.idea/
+.vscode/
+.mcp.json
