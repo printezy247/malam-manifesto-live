@@ -6,3 +6,15 @@ playwright-report/
 releases/
 qualification-evidence/
 *.log
+.claude/
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.ripgreprc
+.idea/
+.vscode/
+.mcp.json

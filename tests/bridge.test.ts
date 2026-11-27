@@ -8,6 +8,8 @@ import {WebSocket} from 'ws';
 import {request as httpRequest} from 'node:http';
 import {createBridge} from '../apps/bridge/src/server.ts';
 import {loadSnapshot,saveSnapshot} from '../apps/bridge/src/persistence.ts';
+import {listPresets} from '../apps/bridge/src/presets.ts';
+import {captureTransform} from '../apps/bridge/src/obs/framing.ts';
 import {makeSnapshot} from '../packages/contracts/src/display.ts';
 
 test('atomic persistence survives corrupt state and interrupted replacement',()=>{
@@ -25,6 +27,15 @@ test('atomic persistence survives corrupt state and interrupted replacement',()=
     writeFileSync(file+'.bak','{}');
     assert.equal(loadSnapshot(file).snapshot,null);
     assert.equal(loadSnapshot(file).recovered,true);
+    const legacy={...initial,revision:2,orientation:'landscape',layout:{...initial.layout,mainOffsetX:32,textScale:'large',slots:{media:{x:1200,y:200,width:500,height:500}}}};
+    writeFileSync(file,JSON.stringify(legacy));
+    writeFileSync(file+'.presets',JSON.stringify([{name:'Opening',snapshot:legacy,updatedAt:'2026-11-27'}]));
+    const migrated=loadSnapshot(file).snapshot!;
+    assert.equal(migrated.revision,2);
+    assert.equal(migrated.orientation,'portrait');
+    assert.deepEqual(migrated.content,legacy.content);
+    assert.deepEqual(migrated.layout,{mainOffsetX:0,mainOffsetY:0,textScale:'large',slots:{}});
+    assert.deepEqual(listPresets(file+'.presets')[0].snapshot,migrated);
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -83,12 +94,22 @@ test('scene presets, live cues and OBS scene switching are role-scoped and valid
   const dir=mkdtempSync(join(tmpdir(),'malam-features-'));
   const credentials={control:randomBytes(32).toString('hex'),overlay:randomBytes(32).toString('hex')};
   const sceneWrites:string[]=[];
+  let activeScene='Scene A';
+  const obsCalls:{type:string;data?:Record<string,unknown>}[]=[];
+  const jpeg=Buffer.from([0xff,0xd8,0xff,0xd9]);
   const fakeObs={
     connect:async()=>{},disconnect:async()=>{},
     listScenes:async()=>['Scene A','Scene B'],
     setProgramScene:async(name:string)=>{sceneWrites.push(name);},
     getStatus:async()=>({connected:true,currentScene:'Scene A',recording:false}),
-    call:async()=>({})
+    call:async(type:string,data?:Record<string,unknown>)=>{
+      obsCalls.push({type,data});
+      if(type==='GetCurrentProgramScene')return {currentProgramSceneName:activeScene};
+      if(type==='GetSourceScreenshot')return {imageData:'data:image/jpeg;base64,'+jpeg.toString('base64')};
+      if(type==='GetVideoSettings')return {baseWidth:1080,baseHeight:1920};
+      if(type==='GetSceneItemId')return {sceneItemId:1};
+      return {};
+    }
   };
   const bridge=await createBridge({port:0,stateFile:join(dir,'state.json'),credentials,obs:()=>fakeObs});
   const base=bridge.url;
@@ -127,6 +148,30 @@ test('scene presets, live cues and OBS scene switching are role-scoped and valid
 
     const obsInfo=await (await call('/api/control/obs',{headers:{Cookie:control}})).json();
     assert.equal(obsInfo.available,true);assert.deepEqual(obsInfo.scenes,['Scene A','Scene B']);
+    assert.equal((await call('/api/control/program-frame',{headers:{Cookie:overlay}})).status,401);
+    const frame=await call('/api/control/program-frame',{headers:{Cookie:control}});
+    assert.equal(frame.headers.get('content-type'),'image/jpeg');
+    assert.deepEqual(Buffer.from(await frame.arrayBuffer()),jpeg);
+    assert.equal(obsCalls.find(call=>call.type==='GetSourceScreenshot')?.data?.sourceName,'Scene A');
+    const align=await post('/api/control/obs/align',control,{sceneName:'MM PORTRAIT | Fight Mode — 2x MT5'});
+    assert.equal(align.status,200);
+    const transforms=()=>obsCalls.filter(call=>call.type==='SetSceneItemTransform').map(call=>call.data?.sceneItemTransform);
+    assert.deepEqual(transforms(),[
+      captureTransform({x:72,y:430,width:840,height:330},'fit'),
+      captureTransform({x:72,y:780,width:840,height:330},'fit')
+    ]);
+    activeScene='MM PORTRAIT | Fight Mode — 2x MT5';
+    const next={...current,templateId:'fight-mode',layout:{...current.layout,sourceLayout:'phone',sourceFit:'fill'}};
+    const published=await post('/api/control/publish',control,{commandId:randomUUID(),expectedRevision:current.revision,snapshot:next});
+    assert.equal(published.status,200);
+    assert.equal((await post('/api/control/obs/align',control,{programRevision:current.revision})).status,409);
+    const result=await post('/api/control/obs/align',control,{programRevision:current.revision+1});
+    assert.equal(result.status,200);
+    assert.equal((await result.json()).sceneName,activeScene);
+    assert.deepEqual(transforms().slice(-2),[
+      captureTransform({x:92,y:432,width:369,height:656},'fill'),
+      captureTransform({x:522,y:432,width:369,height:656},'fill')
+    ]);
     assert.equal((await post('/api/control/obs/scene',control,{name:'Scene B'})).status,200);
     assert.deepEqual(sceneWrites,['Scene B']);
     assert.equal((await post('/api/control/obs/scene',control,{name:''})).status,400);

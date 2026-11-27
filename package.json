@@ -15,9 +15,9 @@
     "check": "npm test && npm run typecheck && npm run lint && npm run build",
     "start": "tsx apps/bridge/src/main.ts",
     "pair:setup": "python3 scripts/pair-setup.py",
-    "validate:presets": "tsx scripts/validate-presets.ts",
+    "validate:presets": "node --import tsx scripts/validate-presets.ts",
     "obs:provision": "tsx scripts/provision-obs-scenes.ts",
-    "audit:overflow": "tsx scripts/overflow-audit.mts"
+    "audit:overflow": "node --import tsx scripts/overflow-audit.mts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

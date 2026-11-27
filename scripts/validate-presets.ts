@@ -3,14 +3,14 @@
 // that does not satisfy the display contract stops a release.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compositions, validateComposition } from '../packages/templates/src/layouts.ts';
+import { compositions, fixedSourceAspect, resolveComposition, sourceRoles, validateComposition } from '../packages/templates/src/layouts.ts';
 import { pointLimits, templateIds, parseDisplaySnapshot } from '../packages/contracts/src/display.ts';
 import { fixtures } from '../fixtures/snapshots.ts';
 
 const failures: string[] = [];
 const check = (condition: boolean, message: string) => { if (!condition) failures.push(message); };
 
-const orientations = ['portrait', 'landscape'] as const;
+const orientations = ['portrait'] as const;
 const expected = new Set<string>();
 for (const id of templateIds) for (const orientation of orientations) expected.add(`${id}:${orientation}`);
 
@@ -26,10 +26,29 @@ for (const [key, layout] of Object.entries(compositions)) {
   check(layout.regions.some(r => r.role === 'main'), `${key}: missing main region`);
   check(layout.regions.some(r => r.role === 'disclosure'), `${key}: missing disclosure region`);
   check(templateIds.includes(id as typeof templateIds[number]), `${key}: unknown template id`);
+  for(const sourceLayout of ['square','phone'] as const) {
+    const framed=resolveComposition(id,{sourceLayout});
+    for(const issue of validateComposition(framed)) failures.push(`${key} ${sourceLayout}: ${issue}`);
+    for(const role of sourceRoles) {
+      const slot=framed.regions.find(r=>role===r.role);
+      const fixed=fixedSourceAspect(id,role);
+      if(!slot||fixed===null)continue;
+      const [w,h]=fixed??(sourceLayout==='square'?[1,1]:[9,16]);
+      check(slot.width*h===slot.height*w,`${key} ${sourceLayout}: invalid aspect ratio for ${role}`);
+    }
+  }
+}
+
+const sceneMap=JSON.parse(readFileSync('assets/obs-scenes/scene-map.json','utf8')) as {scenes:{name:string;templateId:string;sourceLayout?:string;sources:{rect?:string}[]}[]};
+for(const scene of sceneMap.scenes.filter(scene=>scene.sourceLayout)) {
+  if(scene.sourceLayout!=='square'&&scene.sourceLayout!=='phone'){failures.push(`${scene.name}: unknown source layout`);continue;}
+  if(!expected.has(`${scene.templateId}:portrait`)){failures.push(`${scene.name}: unknown template`);continue;}
+  const regions=resolveComposition(scene.templateId,{sourceLayout:scene.sourceLayout}).regions;
+  for(const {rect} of scene.sources) if(rect?.startsWith('media'))check(regions.some(region=>region.role===rect),`${scene.name}: missing ${rect}`);
 }
 
 // Every fixture must parse and stay within the per-composition capacity bounds.
-check(fixtures.length === templateIds.length * 2 * 3, `Expected ${templateIds.length * 2 * 3} fixtures, found ${fixtures.length}`);
+check(fixtures.length === templateIds.length * 3, `Expected ${templateIds.length * 3} fixtures, found ${fixtures.length}`);
 for (const snapshot of fixtures) {
   let parsed;
   try { parsed = parseDisplaySnapshot(snapshot); }
@@ -64,4 +83,4 @@ if (failures.length) {
   for (const failure of failures) console.error(` - ${failure}`);
   process.exit(1);
 }
-console.log(`Preset validation passed: ${expected.size} compositions, ${fixtures.length} fixtures.`);
+console.log(`Preset validation passed: ${expected.size} compositions, ${fixtures.length} fixtures, ${sceneMap.scenes.length} OBS scenes.`);

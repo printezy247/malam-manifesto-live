@@ -1,8 +1,10 @@
 import { z } from 'zod';
-import { compositions, validateComposition } from '../../templates/src/layouts.ts';
+import { resolveComposition, sourceLayouts, validateComposition } from '../../templates/src/layouts.ts';
 import { getCanvas } from './layout.js';
 
 export const templateIds = ['starting-soon','hype-intro','title-card','vigil','principles-board','board','presenter','chart','qa','poll','chat-highlight','resource-card','short-break','technical-difficulty','end-screen','recap-closing','duo-cam','vs-battle','gameplay','player-intro','live-shop','fight-mode','trader-focus','commentary','winner','manifesto-about'] as const;
+export const matchTemplates = new Set<string>(['vs-battle','fight-mode','commentary']);
+const fighter = z.strictObject({health:z.number().int().min(0).max(100), rounds:z.number().int().min(0).max(3)});
 // Per-composition content capacity. These are the "maximum permitted content"
 // bounds that every layout can render legibly; the schema rejects anything larger.
 export const pointLimits: Record<typeof templateIds[number],{count:number;chars:number}> = {
@@ -26,22 +28,23 @@ const date = z.string().datetime({offset:true}).refine(s => {
 export const displaySchema = z.strictObject({
   schemaVersion:z.literal(1), sessionId:z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
   revision:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER-1), templateId:z.enum(templateIds),
-  orientation:z.enum(['portrait','landscape']), motionMode:z.enum(['standard','low','static']),
+  orientation:z.literal('portrait'), motionMode:z.enum(['standard','low','static']),
+  match:z.strictObject({a:fighter,b:fighter}).optional(),
   content:z.strictObject({title:text(80).refine(s=>!!s.trim(),'Title is required'),presenter:text(60),
     points:z.array(text(160)).max(5),caption:text(240),disclosure:text(240),countdownEndsAt:date.nullable(),
     chartDescription:text(240).default(''), locale:z.enum(['en','ms']).default('en'),
     link:text(200).refine(s=>!s.trim()||/^(https?:\/\/|www\.)\S+$/i.test(s.trim()),'Use a full http(s) URL').nullable().default(null)})
   ,layout:z.strictObject({mainOffsetX:z.number().int().min(-48).max(48),mainOffsetY:z.number().int().min(-48).max(48),textScale:z.enum(['normal','large']),
+    sourceLayout:z.enum(sourceLayouts).optional(),sourceFit:z.enum(['fit','fill']).optional(),
     slots:z.strictObject({media:slotRect.optional(),media2:slotRect.optional(),media3:slotRect.optional()}).default({})}).default({mainOffsetX:0,mainOffsetY:0,textScale:'normal',slots:{}})
 }).superRefine((s,ctx)=>{
   const limit=pointLimits[s.templateId];
   if(s.content.points.length>limit.count) ctx.addIssue({code:'custom',path:['content','points'],message:`This layout supports at most ${limit.count} points`});
   s.content.points.forEach((point,index)=>{ if(Array.from(point).length>limit.chars) ctx.addIssue({code:'custom',path:['content','points',index],message:`Keep each point under ${limit.chars} characters for this layout`}); });
-  const layout=structuredClone(compositions[`${s.templateId}:${s.orientation}`]);
-  const main=layout.regions.find(r=>r.role==='main')!;
-  main.x+=s.layout.mainOffsetX; main.y+=s.layout.mainOffsetY;
+  const mode=s.layout.sourceLayout??'scene';
+  const layout=resolveComposition(s.templateId,mode==='scene'?{...s.layout,slots:{}}:s.layout);
   if(validateComposition(layout).length) ctx.addIssue({code:'custom',path:['layout'],message:'Placement collides with a protected region or canvas edge'});
-  const canvas=getCanvas(s.orientation);
+  const canvas=getCanvas();
   for(const [role,slot] of Object.entries(s.layout.slots)) {
     if(slot&&(slot.x+slot.width>canvas.width||slot.y+slot.height>canvas.height)) ctx.addIssue({code:'custom',path:['layout','slots',role],message:'Source slot must fit inside the canvas'});
   }
@@ -52,6 +55,6 @@ export const parseDisplaySnapshot = (input: unknown): DisplaySnapshot => display
 export const publishSchema = z.strictObject({commandId:z.string().uuid(),expectedRevision:z.number().int().nonnegative(),snapshot:displaySchema});
 export type PublishRequest = z.infer<typeof publishSchema>;
 export function makeSnapshot(): DisplaySnapshot {
-  return parseDisplaySnapshot({schemaVersion:1,sessionId:'local-show',revision:0,templateId:'starting-soon',orientation:'landscape',motionMode:'static',
+  return parseDisplaySnapshot({schemaVersion:1,sessionId:'local-show',revision:0,templateId:'starting-soon',orientation:'portrait',motionMode:'static',
     content:{title:'Malam Manifesto Live',presenter:'Aish Capital',points:['Fahami pasaran sebelum meneka arah.','Proses berdisiplin mengalahkan ramalan.'],caption:'',disclosure:'Kandungan pendidikan sahaja. Bukan nasihat kewangan.',countdownEndsAt:null,chartDescription:'',locale:'ms',link:null}});
 }

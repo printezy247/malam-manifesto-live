@@ -1,7 +1,8 @@
-export function getCanvas(orientation) {
-  if (orientation === 'portrait') return { width: 1080, height: 1920 };
-  if (orientation === 'landscape') return { width: 1920, height: 1080 };
-  throw new TypeError('Unsupported orientation');
+export const CANVAS = Object.freeze({ width: 1080, height: 1920 });
+
+/** The only canvas this build renders. Portrait-only for TikTok LIVE. */
+export function getCanvas() {
+  return { ...CANVAS };
 }
 
 export function validateRegions(regions, canvas) {

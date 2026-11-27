@@ -1,6 +1,8 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {Broadcast} from '../../../packages/templates/src/Broadcast.tsx';
+import {isOverlayPart} from '../../../packages/templates/src/overlay-parts.ts';
 import {makeSnapshot,type DisplaySnapshot} from '../../../packages/contracts/src/display.ts';
+import {CANVAS} from '../../../packages/contracts/src/layout.js';
 import {acceptSnapshot} from './snapshot-client.ts';
 import {Pairing} from '../../shared/Pairing.tsx';
 
@@ -11,10 +13,22 @@ export function Overlay() {
   const [snapshot,setSnapshot]=useState<DisplaySnapshot|null>(null);
   const [connected,setConnected]=useState(false);
   const [cue,setCue]=useState<LiveCue|null>(null);
+  const [hash,setHash]=useState(location.hash);
   const last=useRef<DisplaySnapshot|null>(null);
-  const transparent=location.pathname==='/overlay-transparent';
   useEffect(()=>{
-    if(transparent) return;
+    const update=()=>setHash(location.hash);
+    window.addEventListener('hashchange',update);
+    return()=>window.removeEventListener('hashchange',update);
+  },[]);
+  const partName=hash.startsWith('#parts=')?hash.slice('#parts='.length):undefined;
+  const part=partName&&isOverlayPart(partName)?partName:undefined;
+  const invalidPart=partName!==undefined&&!part;
+  const backdropOnly=part==='backdrop';
+  const transparent=!backdropOnly&&(!!part||location.pathname==='/overlay-transparent');
+  const showPairing=!part||part==='header';
+  const showCue=!part||part==='cue';
+  useEffect(()=>{
+    if(!showCue||!paired||invalidPart) return;
     let stopped=false;let timer:ReturnType<typeof setTimeout>;
     const poll=async()=>{
       try {
@@ -25,14 +39,19 @@ export function Overlay() {
     };
     void poll();
     return()=>{stopped=true;clearTimeout(timer);};
-  },[transparent]);
+  },[showCue,paired,invalidPart]);
   useEffect(()=>{
+    if(invalidPart)return;
     let stopped=false;let socket:WebSocket|undefined;let retry:ReturnType<typeof setTimeout>;let delay=1000;
     const connect=async()=>{
       try {
         const response=await fetch('/api/overlay/snapshot');
         if(stopped)return;
-        if(response.status===401){setPaired(false);setConnected(false);return;}
+        if(response.status===401){
+          setPaired(false);setConnected(false);setSnapshot(null);
+          if(!showPairing)retry=setTimeout(connect,2500);
+          return;
+        }
         if(!response.ok)throw new Error();
         const incoming=await response.json();
         if(stopped)return;
@@ -42,16 +61,17 @@ export function Overlay() {
         // so show it immediately rather than waiting for the next publish event.
         socket.onopen=()=>setConnected(true);
         socket.onmessage=e=>{try {last.current=acceptSnapshot(last.current,JSON.parse(e.data));setSnapshot(last.current);setConnected(true);delay=1000;}catch {setConnected(false);socket?.close();}};
-        socket.onclose=()=>{setConnected(false);if(!stopped){retry=setTimeout(connect,delay);delay=Math.min(10000,delay*2);}};
+        socket.onclose=()=>{if(!stopped){setConnected(false);retry=setTimeout(connect,delay);delay=Math.min(10000,delay*2);}};
       } catch {setConnected(false);if(!stopped){retry=setTimeout(connect,delay);delay=Math.min(10000,delay*2);}}
     };
     void connect();return()=>{stopped=true;clearTimeout(retry);socket?.close();};
-  },[paired]);
-  if(!paired&&!snapshot) return <Pairing role="overlay" onPaired={()=>setPaired(true)}/>;
-  const fallback={...makeSnapshot(),orientation:snapshot?.orientation??'landscape',templateId:'technical-difficulty' as const,content:{...makeSnapshot().content,title:'Sambungan terputus / Connection interrupted'}};
+  },[paired,showPairing,invalidPart]);
+  if(invalidPart)return null;
+  if(!snapshot)return showPairing&&!paired?<Pairing role="overlay" onPaired={()=>setPaired(true)}/>:null;
+  const fallback={...makeSnapshot(),orientation:'portrait' as const,templateId:'technical-difficulty' as const,content:{...makeSnapshot().content,title:'Sambungan terputus / Connection interrupted'}};
   const shown=connected&&snapshot?snapshot:fallback;
-  return <div className={`overlay-stage ${shown.orientation} ${transparent?'overlay-transparent':''}`}>
-    <Broadcast snapshot={shown} connected={connected} transparent={transparent}/>
-    {cue&&!transparent&&<div className="cue-bar" role="status"><span className="cue-dot"/><span className="cue-text">{cue.text}</span></div>}
+  return <div className={`overlay-stage ${shown.orientation} ${transparent?'overlay-transparent':''}`} style={CANVAS}>
+    {part!=='cue'&&<Broadcast snapshot={shown} connected={connected} transparent={transparent} backdropOnly={backdropOnly} part={part}/>}
+    {cue&&showCue&&<div className="cue-bar" role="status"><span className="cue-dot"/><span className="cue-text">{cue.text}</span></div>}
   </div>;
 }

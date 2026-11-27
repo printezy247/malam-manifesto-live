@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getCanvas } from '../packages/contracts/src/layout.js';
+import { getCanvas, CANVAS } from '../packages/contracts/src/layout.js';
 
-test('portrait and landscape use explicit broadcast dimensions', () => {
-  assert.deepEqual(getCanvas('portrait'), { width: 1080, height: 1920 });
-  assert.deepEqual(getCanvas('landscape'), { width: 1920, height: 1080 });
-  assert.throws(() => getCanvas('invalid'));
+test('the only canvas this build renders is TikTok LIVE portrait 1080x1920', () => {
+  assert.deepEqual(getCanvas(), { width: 1080, height: 1920 });
+  assert.deepEqual(CANVAS, { width: 1080, height: 1920 });
+  assert.ok(Object.isFrozen(CANVAS));
+  assert.notEqual(getCanvas(), CANVAS);
 });

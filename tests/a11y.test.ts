@@ -6,7 +6,7 @@ import {AxeBuilder} from '@axe-core/playwright';
 
 // axe-core accessibility audit against the real built pages served by Vite dev.
 // Covers the control desk (pairing + desk chrome), the overlay chrome and the
-// 40-composition gallery, which embeds every Broadcast scene.
+// 26-composition portrait gallery, which embeds every Broadcast scene.
 let vite:ViteDevServer;let browser:Browser;let base='';
 
 before(async()=>{

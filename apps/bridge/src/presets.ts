@@ -1,6 +1,7 @@
 import {existsSync,mkdirSync,readFileSync,openSync,writeFileSync,fsyncSync,closeSync,renameSync,chmodSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {displaySchema,type DisplaySnapshot} from '../../../packages/contracts/src/display.ts';
+import {readStoredSnapshot} from './persistence.ts';
 
 export type ScenePreset={name:string;snapshot:DisplaySnapshot;updatedAt:string};
 export const presetNameSchema=(name:unknown):string|null=>{
@@ -16,8 +17,8 @@ function readAll(file:string):ScenePreset[] {
     if(!Array.isArray(parsed)) return [];
     return parsed.flatMap(item=>{
       const name=presetNameSchema(item?.name);
-      const snapshot=displaySchema.safeParse(item?.snapshot);
-      return name&&snapshot.success?[{name,snapshot:snapshot.data,updatedAt:typeof item.updatedAt==='string'?item.updatedAt:''}]:[];
+      const snapshot=readStoredSnapshot(item?.snapshot);
+      return name&&snapshot?[{name,snapshot,updatedAt:typeof item.updatedAt==='string'?item.updatedAt:''}]:[];
     }).slice(0,100);
   } catch {return [];}
 }

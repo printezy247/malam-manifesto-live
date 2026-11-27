@@ -15,7 +15,7 @@ export function fixtureFor(templateId:DisplaySnapshot['templateId'],orientation:
     link:['resource-card','end-screen'].includes(templateId)?'https://malam-manifesto.example/resources':null,
     chartDescription:'Ruang rakaman untuk carta atau skrin operasi.'}});
 }
-export const fixtures=templateIds.flatMap(id=>(['portrait','landscape'] as const).flatMap(orientation=>{
+export const fixtures=templateIds.flatMap(id=>(['portrait'] as const).flatMap(orientation=>{
   const normal=fixtureFor(id,orientation);
   const limit=pointLimits[id];
   const maxPoint='Prinsip perdagangan dan manajemen risiko. '.repeat(4).slice(0,limit.chars);

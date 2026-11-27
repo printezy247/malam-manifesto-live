@@ -7,10 +7,13 @@ import {z} from 'zod';
 import {makeSnapshot,publishSchema,displaySchema,type DisplaySnapshot} from '../../../packages/contracts/src/display.ts';
 import {loadSnapshot,saveSnapshot} from './persistence.ts';
 import {listPresets,savePreset,deletePreset,presetNameSchema} from './presets.ts';
-import {compositions} from '../../../packages/templates/src/layouts.ts';
+import {resolveComposition,sourceRoles,type SourceLayout} from '../../../packages/templates/src/layouts.ts';
+import {CANVAS} from '../../../packages/contracts/src/layout.js';
 import type {ObsAdapter} from './obs/client.ts';
+import {captureTransform} from './obs/framing.ts';
 
 type Role='control'|'overlay';
+type ManagedScene={name:string;templateId:DisplaySnapshot['templateId'];sourceLayout?:SourceLayout;sources:(string|{kind:string;label?:string;rect?:string|number[]})[]};
 type Options={port:number;stateFile:string;credentials:Record<Role,string>;now?:()=>number;sessionMs?:number;webRoot?:string;presetsFile?:string;sceneMapFile?:string;obs?:()=>ObsAdapter|Promise<ObsAdapter>};
 const json=(res:ServerResponse,status:number,value:unknown)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);};
@@ -26,6 +29,10 @@ async function body(req:IncomingMessage):Promise<unknown> {
 const hasControlChars=(s:string)=>{for(const c of s){const n=c.codePointAt(0)??0;if(n<32||n===127)return true;}return false;};
 export async function createBridge(options:Options) {
   const now=options.now??Date.now;
+  const sceneDefinitions=()=>{
+    try{return (JSON.parse(readFileSync(options.sceneMapFile??'assets/obs-scenes/scene-map.json','utf8')) as {scenes:ManagedScene[]}).scenes;}
+    catch{return [];}
+  };
   const restored=loadSnapshot(options.stateFile);
   let snapshot=restored.snapshot??makeSnapshot();
   const sessions=new Map<string,{role:Role;expires:number}>();
@@ -37,14 +44,36 @@ export async function createBridge(options:Options) {
   const presetsFile=options.presetsFile??join(dirname(options.stateFile),'presets.json');
   let liveCue:{id:string;text:string;expiresAt:number}|null=null;
   let obsAdapter:ObsAdapter|null=null;
-  let obsTried=false;
+  let alignmentQueue=Promise.resolve();
+  let obsConnection:Promise<ObsAdapter>|null=null;
   const getObs=async():Promise<ObsAdapter|null>=>{
     if(!options.obs) return null;
-    if(obsAdapter) return obsAdapter;
-    if(!obsTried) {obsTried=true;try{obsAdapter=await options.obs();await obsAdapter.connect();}catch{obsAdapter=null;obsTried=false;throw new Error('OBS_UNAVAILABLE');}}
-    if(!obsAdapter) throw new Error('OBS_UNAVAILABLE');
-    return obsAdapter;
+    obsConnection??=(async()=>{
+      obsAdapter??=await options.obs!();
+      await obsAdapter.connect();
+      return obsAdapter;
+    })().finally(()=>{obsConnection=null;});
+    return obsConnection;
   };
+  async function currentObsScene(obs:ObsAdapter):Promise<string|null> {
+    const {currentProgramSceneName}=await obs.call('GetCurrentProgramScene');
+    return typeof currentProgramSceneName==='string'&&currentProgramSceneName?currentProgramSceneName:null;
+  }
+  let programFrameRequest:Promise<Buffer|null>|null=null;
+  async function captureProgramFrame():Promise<Buffer|null> {
+    const obs=await getObs();
+    if(!obs)return null;
+    const scene=await currentObsScene(obs);
+    if(!scene)return null;
+    const {imageData}=await obs.call('GetSourceScreenshot',{
+      sourceName:scene,imageFormat:'jpg',imageWidth:405,imageHeight:720,imageCompressionQuality:70
+    });
+    if(typeof imageData!=='string'||imageData.length>1_500_000)return null;
+    const encoded=/^data:image\/(?:jpeg|jpg);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(imageData)?.[1];
+    if(!encoded)return null;
+    const frame=Buffer.from(encoded,'base64');
+    return frame[0]===0xff&&frame[1]===0xd8&&frame.at(-2)===0xff&&frame.at(-1)===0xd9?frame:null;
+  }
   const cuePayload=()=>liveCue&&liveCue.expiresAt>now()?{cue:{id:liveCue.id,text:liveCue.text,expiresAt:liveCue.expiresAt}}:{cue:null};
   let url=''; let host='';
   const authenticate=(req:IncomingMessage,role:Role):string|null=>{
@@ -70,7 +99,8 @@ export async function createBridge(options:Options) {
     res.setHeader('Cache-Control','no-store');
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
-    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:*; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    const imagePolicy=req.url==='/'||req.url==='/control'?"img-src 'self' data: blob:":"img-src 'self' data:";
+    res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; ${imagePolicy}; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:*; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
     if(!trusted(req,req.method!=='GET')) return json(res,403,{error:'Forbidden'});
     // No query strings, tokens in URLs, filesystem paths, arbitrary upstream URLs or CORS.
     const path=req.url??'/';
@@ -97,18 +127,27 @@ export async function createBridge(options:Options) {
         if(req.method==='GET'&&role==='control'&&path==='/api/control/presets') return json(res,200,{presets:listPresets(presetsFile)});
         if(req.method==='GET'&&role==='overlay'&&path==='/api/overlay/cue') return json(res,200,cuePayload());
         if(req.method==='GET'&&role==='control'&&path==='/api/control/cue') return json(res,200,cuePayload());
+        if(req.method==='GET'&&role==='control'&&path==='/api/control/program-frame') {
+          programFrameRequest??=captureProgramFrame().catch(()=>null).finally(()=>{programFrameRequest=null;});
+          const frame=await programFrameRequest;
+          if(!frame)return json(res,503,{error:'OBS Program frame unavailable'});
+          res.setHeader('Content-Type','image/jpeg');
+          res.end(frame);
+          return;
+        }
         if(req.method==='GET'&&role==='control'&&path==='/api/control/obs') {
           try {
             const obs=await getObs();
             if(!obs) return json(res,200,{available:false});
-            const [scenes,status]=await Promise.all([obs.listScenes(),obs.getStatus()]);
-            return json(res,200,{available:true,...status,scenes});
+            const [scenes,status,currentScene]=await Promise.all([obs.listScenes(),obs.getStatus(),currentObsScene(obs)]);
+            const managed=sceneDefinitions().map(({name,templateId,sourceLayout})=>({name:`MM PORTRAIT | ${name}`,templateId,sourceLayout}));
+            return json(res,200,{available:true,...status,currentScene:currentScene??status.currentScene,scenes,managed});
           } catch {return json(res,200,{available:false});}
         }
         if(req.method==='POST'&&role==='control') {
           if(writes.reset<=now()) writes={count:0,reset:now()+1000};
           if(path!=='/api/control/emergency'&&++writes.count>20) return json(res,429,{error:'Command rate limited'});
-          if(path==='/api/control/emergency') return json(res,200,publish({...snapshot,revision:snapshot.revision+1,templateId:'technical-difficulty',motionMode:'static',layout:{mainOffsetX:0,mainOffsetY:0,textScale:'normal',slots:{}},content:{...makeSnapshot().content,title:'Gangguan teknikal',points:['Kami akan kembali sebentar lagi.']}}));
+          if(path==='/api/control/emergency') return json(res,200,publish({...makeSnapshot(),sessionId:snapshot.sessionId,revision:snapshot.revision+1,templateId:'technical-difficulty',content:{...makeSnapshot().content,title:'Gangguan teknikal',points:['Kami akan kembali sebentar lagi.']}}));
           if(path==='/api/control/presets/save'||path==='/api/control/presets/delete') {
             if(req.headers['content-type']!=='application/json') return json(res,415,{error:'JSON required'});
             const saving=path.endsWith('/save');
@@ -144,45 +183,59 @@ export async function createBridge(options:Options) {
           }
           if(path==='/api/control/obs/align') {
             if(req.headers['content-type']!=='application/json') return json(res,415,{error:'JSON required'});
-            const parsed=z.strictObject({sceneName:z.string().min(1).max(160)}).safeParse(await body(req));
-            if(!parsed.success) return json(res,400,{ok:false,code:'INVALID'});
+            const parsed=z.strictObject({sceneName:z.string().min(1).max(160).optional(),programRevision:z.number().int().nonnegative().optional()}).safeParse(await body(req));
+            if(!parsed.success||(!parsed.data.sceneName&&parsed.data.programRevision===undefined)) return json(res,400,{ok:false,code:'INVALID'});
+            const previousAlignment=alignmentQueue;
+            let releaseAlignment!:()=>void;
+            alignmentQueue=new Promise<void>(resolve=>{releaseAlignment=resolve;});
+            await previousAlignment;
             try {
               const obs=await getObs();
               if(!obs) return json(res,503,{ok:false,code:'OBS_UNAVAILABLE'});
-              const map=JSON.parse(readFileSync(options.sceneMapFile??'assets/obs-scenes/scene-map.json','utf8')) as {scenes:{name:string;sources:(string|{kind:string;label?:string;rect?:string})[]}[]};
-              const prefix=`MM ${snapshot.orientation==='portrait'?'PORTRAIT':'LANDSCAPE'} | `;
-              const short=parsed.data.sceneName.startsWith(prefix)?parsed.data.sceneName.slice(prefix.length):parsed.data.sceneName;
-              const def=map.scenes.find(s=>s.name===short);
+              const currentScene=await currentObsScene(obs);
+              const sceneName=parsed.data.sceneName??currentScene;
+              if(!sceneName)return json(res,404,{ok:false,code:'UNKNOWN_SCENE'});
+              const short=sceneName.replace(/^MM PORTRAIT \| /,'');
+              const def=sceneDefinitions().find(s=>s.name===short);
               if(!def) return json(res,404,{ok:false,code:'UNKNOWN_SCENE'});
               const settings=await obs.call('GetVideoSettings') as {baseWidth:number;baseHeight:number};
-              const overlayW=snapshot.orientation==='portrait'?1080:1920,overlayH=snapshot.orientation==='portrait'?1920:1080;
-              const sx=settings.baseWidth/overlayW,sy=settings.baseHeight/overlayH;
-              const comp=compositions[`${snapshot.templateId}:${snapshot.orientation}`];
+              if(settings.baseWidth!==CANVAS.width||settings.baseHeight!==CANVAS.height)return json(res,409,{ok:false,code:'CANVAS_MISMATCH'});
+              if(parsed.data.programRevision!==undefined&&(currentScene!==sceneName||snapshot.revision!==parsed.data.programRevision||snapshot.templateId!==def.templateId)) {
+                return json(res,409,{ok:false,code:'PROGRAM_CHANGED'});
+              }
+              const preset=listPresets(presetsFile).find(p=>p.name===sceneName||p.name===short);
+              const placement=currentScene===sceneName&&snapshot.templateId===def.templateId?snapshot:preset?.snapshot;
+              const layout=placement?.templateId===def.templateId?placement.layout:undefined;
+              const comp=resolveComposition(def.templateId,layout??{sourceLayout:def.sourceLayout});
               const aligned:string[]=[],missed:string[]=[];
+              const stale=()=>parsed.data.programRevision!==undefined&&snapshot.revision!==parsed.data.programRevision;
               for(const src of def.sources) {
-                let label:string,rectName:string;
+                if(stale())return json(res,409,{ok:false,code:'PROGRAM_CHANGED'});
+                let label:string,rectName:string|number[];
                 if(typeof src==='string'){if(src==='overlay')continue;const[k,l]=src.split(':');label=l??k;rectName='media';}
-                else{label=src.label??src.kind;rectName=src.rect??'media';}
-                const role=/^(media[23]?)(?:-(?:fill|stretch))?$/.exec(rectName)?.[1];
+                else{if(src.kind==='overlay')continue;label=src.label??src.kind;rectName=src.rect??'media';}
+                if(typeof rectName!=='string')continue;
+                const [,role,placementMode]=/^(media[23]?)(?:-(fill|stretch))?$/.exec(rectName)??[];
                 if(!role) continue;
-                const base=comp.regions.find(r=>r.role===role);
-                const over=snapshot.layout.slots[role as 'media'|'media2'|'media3'];
-                const box=over??(base?{x:base.x,y:base.y,width:base.width,height:base.height}:null);
+                const box=sourceRoles.some(sourceRole=>role===sourceRole)&&comp.regions.find(r=>r.role===role);
                 if(!box) continue;
-                const inputName=`${parsed.data.sceneName} :: ${label}`;
+                const inputName=`${sceneName} :: ${label}`;
                 try {
-                  const idRes=await obs.call('GetSceneItemId',{sceneName:parsed.data.sceneName,sourceName:inputName});
+                  const idRes=await obs.call('GetSceneItemId',{sceneName,sourceName:inputName});
                   const sceneItemId=idRes.sceneItemId as number;
-                  const tRes=await obs.call('GetSceneItemTransform',{sceneName:parsed.data.sceneName,sceneItemId});
-                  const t=(tRes.sceneItemTransform??{}) as Record<string,unknown>;
-                  await obs.call('SetSceneItemTransform',{sceneName:parsed.data.sceneName,sceneItemId,sceneItemTransform:{
-                    ...t,positionX:Math.round(box.x*sx),positionY:Math.round(box.y*sy),
-                    boundsWidth:Math.round(box.width*sx),boundsHeight:Math.round(box.height*sy)}});
+                  const fit=layout?.sourceFit??(placementMode==='fill'||placementMode==='stretch'?placementMode:'fit');
+                  const input=await obs.call('GetInputSettings',{inputName}).catch(()=>null);
+                  if(stale())return json(res,409,{ok:false,code:'PROGRAM_CHANGED'});
+                  if(input?.inputKind==='browser_source') {
+                    await obs.call('SetInputSettings',{inputName,inputSettings:{width:box.width,height:box.height},overlay:true});
+                  }
+                  await obs.call('SetSceneItemTransform',{sceneName,sceneItemId,sceneItemTransform:captureTransform(box,fit)});
                   aligned.push(label);
                 } catch {missed.push(label);}
               }
-              return json(res,200,{ok:true,aligned,missed});
+              return json(res,200,{ok:true,sceneName,aligned,missed});
             } catch {return json(res,503,{ok:false,code:'OBS_UNAVAILABLE'});}
+            finally {releaseAlignment();}
           }
           if(path==='/api/control/publish') {
             if(req.headers['content-type']!=='application/json') return json(res,415,{error:'JSON required'});
